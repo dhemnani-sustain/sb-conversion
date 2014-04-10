@@ -1,0 +1,327 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<conversion environment="Santa Barbara">
+    <databases>
+        <database name="SB-perv" description="SJE source database" type="Pervasive" version="9.5"
+                  connectionstring="Database Name=SBCCA03182014;Host=10.1.3.19"/>
+        <database name="SB-conv" description="eCourt destination database" type="SqlServer" version="2008 R2"
+                  connectionstring="Persist Security Info=False;User ID=ecourt;Initial Catalog=SB-ConvSandbox;Data Source=ST018;password=dbpass"/>
+        <database name="SB-stage" description="eCourt Staging database" type="SqlServer" version="2008 R2"
+                  connectionstring="Persist Security Info=False;User ID=ecourt;Initial Catalog=SB-Stage;Data Source=ST018;password=dbpass"/>
+        <database name="TempDBSB" description="eCourt lookup database" type="SqlServer" version="2008 R2"
+                  connectionstring="Persist Security Info=False;User ID=ecourt;Initial Catalog=TempDBSB;Data Source=ST018;password=dbpass"/>
+    </databases>
+    <stages>
+        <stage num="1" desc="" mode="Serial">
+            <actions>
+                <action type="PervToSqlBulkCopy" desc="BulkCopy SJE Code table" verbose="true" notifybatch="50000">
+                    <entity prefix="Cod" code="COD" desc="Code"/>
+                    <source database="SB-perv" table="Code">
+                        <sql type="Select" desc="">SELECT CodNum, CodCode, CodDesc FROM "Code"</sql>
+                    </source>
+                    <destination database="SB-stage" table="sjeCode" creation="SchemaTable" exists="DropFirst">
+                        <sql type="PostUpdate" desc="Remove extra spaces from char datatype in source">UPDATE [sjeCode]
+                            SET [CodCode] = rtrim([CodCode]), [CodDesc] = rtrim([CodDesc])
+                        </sql>
+                        <sql type="PostUpdate" desc="Add index to sjeParentKey">CREATE NONCLUSTERED INDEX [sjeCodeId] ON
+                            [sjeCode] ([CodNum] ASC) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB
+                            = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON,
+                            ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+                        </sql>
+                    </destination>
+                </action>
+                <action type="PervToSqlBulkCopy" desc="BulkCopy SJE Journal Type Table" verbose="true"
+                        notifybatch="50000">
+                    <source database="SB-perv" table="Journal Type Table">
+                        <sql type="Select" desc="">SELECT FfmCode, FfmDescription FROM "Journal Type Table"</sql>
+                    </source>
+                    <destination database="SB-stage" table="sjeJournalTypeTable" creation="SchemaTable"
+                                 exists="DropFirst">
+                        <sql type="PostUpdate" desc="Remove extra spaces from char datatype in source">UPDATE
+                            [sjeJournalTypeTable] SET [FfmCode] = rtrim([FfmCode]), [FfmDescription] =
+                            rtrim([FfmDescription])
+                        </sql>
+                        <sql type="PostUpdate" desc="Add index to sjeParentKey">CREATE NONCLUSTERED INDEX [sjeCodeId] ON
+                            [sjeJournalTypeTable] ([FfmCode] ASC) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF,
+                            SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF,
+                            ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+                        </sql>
+                    </destination>
+                </action>
+                <!-- Journal -->
+                <action type="PervToSqlBulkCopy" desc="BulkCopy SJE Journal table" verbose="true" notifybatch="50000">
+                    <source database="SB-perv" table="Journal">
+                        <sql type="Select" desc="">SELECT JrlDivID, JrlFileID, JrlParentEntType, JrlParentEntNum,
+                            JrlEntNum, JrlType, JrlDate, JrlTime, JrlAmount, JrlUserCode1,
+                            JrlReceiptNum, JrlApplyDate, JrlReceiptMemo, JrlClass, JrlReverseMemo, JrlReverseType,
+                            JrlReverseDate, JrlReverseTime, JrlReverseUserID, JrlCourtLocation
+                            FROM Journal
+                        </sql>
+                    </source>
+                    <destination database="SB-stage" table="sjeJournal" creation="SchemaTable" exists="DropFirst">
+                        <sql type="PostUpdate" desc="Add key and parent key columns">ALTER TABLE sjeJournal ADD sjeKey
+                            varchar(50), sjeParentKey varchar(50), sjeDivFile varchar(255), convJrlDateTime datetime2,
+                            convJrlReverseDateTime datetime2
+                        </sql>
+                        <sql type="PostUpdate" desc="Remove extra spaces from char datatype in source">UPDATE
+                            [sjeJournal] SET [JrlDivID] = rtrim([JrlDivID]),[JrlFileID] =
+                            rtrim([JrlFileID]),[JrlParentEntType] = rtrim([JrlParentEntType]),[JrlType] =
+                            rtrim([JrlType]),[JrlReceiptNum] = rtrim([JrlReceiptNum]),
+                            [JrlReceiptMemo] = rtrim([JrlReceiptMemo]),[JrlClass] = rtrim([JrlClass]),[JrlReverseMemo] =
+                            rtrim([JrlReverseMemo]),[JrlReverseType] = rtrim([JrlReverseType]),[JrlCourtLocation] =
+                            rtrim([JrlCourtLocation])
+                        </sql>
+                        <sql type="PostUpdate" desc="Populate key columns">UPDATE sjeJournal SET sjeKey = JrlDivID +
+                            JrlFileID + 'JRL' + Cast(JrlEntNum as varchar), sjeParentKey = JrlDivID + JrlFileID +
+                            JrlParentEntType + Cast(JrlParentEntNum as varchar), sjeDivFile = rtrim(JrlDivID) +
+                            rtrim(JrlFileID)
+                        </sql>
+                        <sql type="PostUpdate" desc="Combine JrlDate and JrlTime">UPDATE sjeJournal SET convJrlDateTime
+                            = CASE WHEN (JrlDate &lt; '1/1/1900' or JrlDate &gt; '1/1/2015') THEN NULL
+                            ELSE cast(dateadd(d,0,datediff(d,0,JrlDate)) + Cast(JrlTime as Time) as datetime2(0)) END
+                        </sql>
+                        <sql type="PostUpdate" desc="Combine LocDate and LocTime">UPDATE sjeJournal SET
+                            convJrlReverseDateTime = CASE WHEN (JrlReverseDate &lt; '1/1/1900' or JrlReverseDate &gt;
+                            '1/1/2015') THEN
+                            NULL
+                            ELSE cast(dateadd(d,0,datediff(d,0,JrlReverseDate)) +
+                            Cast(JrlReverseTime as Time) as datetime2(0)) END
+                        </sql>
+                        <sql type="PostUpdate" desc="Add sjeKey index">CREATE NONCLUSTERED INDEX [sjeKeyIndex] ON
+                            sjeJournal (sjeKey ASC) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB
+                            = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON,
+                            ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+                        </sql>
+                        <sql type="PostUpdate" desc="Add sjeParentKey index">CREATE NONCLUSTERED INDEX
+                            [sjeParentKeyIndex] ON sjeJournal (sjeParentKey ASC) WITH (PAD_INDEX = OFF,
+                            STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING =
+                            OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+                        </sql>
+                        <sql type="PostUpdate" desc="Add index to sjeDivFile">CREATE NONCLUSTERED INDEX
+                            [sjeDivFileIndex] ON sjeJournal (sjeDivFile ASC) WITH (PAD_INDEX = OFF,
+                            STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING =
+                            OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+                        </sql>
+                        <sql type="PostUpdate" desc="Remove journal records that do not have corresponding case records"
+                             outfmt="TEST: Orphan journal records: {1} removed">DELETE sjeJournal FROM sjeJournal t1
+                            left join sjeCase c on c.sjeDivFile = t1.sjeDivFile where c.sjeDivFile is null
+                        </sql>
+                    </destination>
+                </action>
+                <!-- Open Item -->
+                <action type="PervToSqlBulkCopy" desc="BulkCopy SJE Open Item table" verbose="true" notifybatch="50000">
+                    <entity prefix="Oim" code="OIM" desc="OPEN ITEM"/>
+                    <source database="SB-perv" table="Open Item">
+                        <sql type="Select" desc="">SELECT OimDivID, OimFileID, OimParentEntType, OimParentEntNum,
+                            OimEntNum, OimTotalAmt, OimBalanceDue, OimOrderDate, OimFirstPmtDate, OimFinalPmtDate,
+                            OimPmtFrequency, OimNormalPmtAmt, OimType, OimClosed, OimPrincipalPTD, OimRelName,
+                            OimRelFirstName FROM "Open Item"
+                        </sql>
+                    </source>
+                    <destination database="SB-stage" table="sjeOpenItem" creation="SchemaTable" exists="DropFirst">
+                        <sql type="PostUpdate" desc="Add key and parent key columns">ALTER TABLE sjeOpenItem ADD sjeKey
+                            varchar(50); ALTER TABLE sjeOpenItem ADD sjeParentKey varchar(50); ALTER TABLE sjeOpenItem
+                            ADD sjeDivFile varchar(255); ALTER TABLE sjeOpenItem ADD obligation_id numeric(19,0);
+                        </sql>
+                        <sql type="PostUpdate" desc="Remove extra spaces from char datatype in source">UPDATE
+                            sjeOpenItem SET OimDivId = rtrim(OimDivId), OimFileID = rtrim(OimFileID), OimParentEntType =
+                            rtrim(OimParentEntType),
+                            OimClosed = rtrim(OimClosed), OimRelName = rtrim(OimRelName), OimRelFirstName =
+                            rtrim(OimRelFirstName)
+                        </sql>
+                        <sql type="PostUpdate" desc="Populate key columns">UPDATE sjeOpenItem SET sjeKey = OimDivID +
+                            OimFileID + 'OIM' + Cast(OimEntNum as varchar), sjeParentKey = OimDivID + OimFileID +
+                            OimParentEntType + Cast(OimParentEntNum as varchar), sjeDivFile=OimDivID + OimFileID
+                        </sql>
+                        <sql type="PostUpdate" desc="Add sjeKey index">CREATE NONCLUSTERED INDEX [sjeKeyIndex] ON
+                            sjeOpenItem (sjeKey ASC) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB
+                            = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON,
+                            ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+                        </sql>
+                        <sql type="PostUpdate" desc="Add sjeParentKey index">CREATE NONCLUSTERED INDEX
+                            [sjeParentKeyIndex] ON sjeOpenItem (sjeParentKey ASC) WITH (PAD_INDEX = OFF,
+                            STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING =
+                            OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+                        </sql>
+                        <sql type="PostUpdate" desc="Add index to sjeDivFile">CREATE NONCLUSTERED INDEX
+                            [sjeDivFileIndex] ON sjeOpenItem (sjeDivFile ASC) WITH (PAD_INDEX = OFF,
+                            STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING =
+                            OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+                        </sql>
+                    </destination>
+                </action>
+                <action type="PervToSqlBulkCopy" desc="BulkCopy SJE Open Item Detail table" verbose="true"
+                        notifybatch="50000">
+                    <entity prefix="Oid" code="OID" desc="OPEN ITEM DETAIL"/>
+                    <source database="SB-perv" table="Open Item Detail">
+                        <sql type="Select" desc="">SELECT OidDivID, OidFileID, OidParentEntType, OidParentEntNum,
+                            OidEntNum, OidAmount, OidFFCCode, OidNumber, OidAmtPaidToDate FROM "Open Item Detail"
+                        </sql>
+                    </source>
+                    <destination database="SB-stage" table="sjeOpenItemDetail" creation="SchemaTable"
+                                 exists="DropFirst">
+                        <sql type="PostUpdate" desc="Add key and parent key columns">ALTER TABLE sjeOpenItemDetail ADD
+                            sjeKey varchar(50); ALTER TABLE sjeOpenItemDetail ADD sjeParentKey varchar(50); ALTER TABLE
+                            sjeOpenItemDetail ADD sjeDivFile varchar(255);
+                        </sql>
+                        <sql type="PostUpdate" desc="Remove extra spaces from char datatype in source">UPDATE
+                            sjeOpenItemDetail SET OidDivId = rtrim(OidDivId), OidFileID = rtrim(OidFileID), OidFFCCode =
+                            rtrim(OidFFCCode)
+                        </sql>
+                        <sql type="PostUpdate" desc="Populate key columns">UPDATE sjeOpenItemDetail SET sjeKey =
+                            OidDivID + OidFileID + 'OID' + Cast(OidEntNum as varchar), sjeParentKey = OidDivID +
+                            OidFileID + OidParentEntType + Cast(OidParentEntNum as varchar), sjeDivFile = OidDivID +
+                            OidFileID
+                        </sql>
+                        <sql type="PostUpdate" desc="Add sjeKey index">CREATE NONCLUSTERED INDEX [sjeKeyIndex] ON
+                            sjeOpenItemDetail (sjeKey ASC) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF,
+                            SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF,
+                            ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+                        </sql>
+                        <sql type="PostUpdate" desc="Add sjeParentKey index">CREATE NONCLUSTERED INDEX
+                            [sjeParentKeyIndex] ON sjeOpenItemDetail (sjeParentKey ASC) WITH (PAD_INDEX = OFF,
+                            STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING =
+                            OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+                        </sql>
+                        <sql type="PostUpdate" desc="Add index to sjeDivFile">CREATE NONCLUSTERED INDEX
+                            [sjeDivFileIndex] ON sjeOpenItemDetail (sjeDivFile ASC) WITH (PAD_INDEX = OFF,
+                            STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING =
+                            OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+                        </sql>
+                        <sql type="PostUpdate"
+                             desc="Remove open item detail records that do not have corresponding open item records">
+                            DELETE sjeOpenItemDetail FROM sjeOpenItemDetail oid left join sjeOpenItem oim on
+                            oid.sjeParentKey = oim.sjeKey where oim.sjeKey is null
+                        </sql>
+                    </destination>
+                </action>
+                <!-- Receipt -->
+                <action type="PervToSqlBulkCopy" desc="BulkCopy SJE Receipt table" verbose="true" notifybatch="50000">
+                    <source database="SB-perv" table="Receipt">
+                        <sql type="Select" desc="">SELECT RecReceiptNum, RecTillNum, RecUserID, RecName, RecDate,
+                            RecTime, RecXrefFileID, RecReceiptMemo, RecAmount, RecType, RecReverseDate, RecReverseTime,
+                            RecReverseUserID, RecReverseType, RecReverseMemo, RecPmtInstrument, RecPmtInstrument1Amt,
+                            RecPmtInstrument2, RecPmtInstrument2Amt FROM "Receipt"
+                        </sql>
+                    </source>
+                    <destination database="SB-stage" table="sjeReceipt" creation="SchemaTable" exists="DropFirst"/>
+                </action>
+            </actions>
+        </stage>
+        <stage num="2" desc="sjeJournal to Sb_ConvertedJournalEntry" mode="Serial">
+            <actions>
+                <!-- Journal parent = 'CAS' -->
+                <action type="SqlToSqlBulkCopy"
+                        desc="BulkCopy sjeJournal and sjeReceipt to tSb_ConvertedJournalEntry for Journal Parent type is CAS"
+                        verbose="true" notifybatch="50000">
+                    <source database="SB-stage" table="sjeJournal">
+                        <sql type="Select">DECLARE @today datetime; SET @today = GETDATE();
+                            SELECT 1 AS 'optlock', @today as 'dateCreated', @today as 'lastUpdated', 'conv' as
+                            'createUsername', 'conv' as 'lastUpdateUsername',
+                            cast(j.JrlReceiptNum as varchar) + coalesce(' - ' + r.RecName, '') as 'receiptNumber',
+                            coalesce((select CodDesc + ' - ' + CodCode from sjeCode where codCode = j.JrlReverseType AND
+                            CodNum = 729), j.JrlReverseType) as 'reverseType',
+                            coalesce((select FfmDescription + ' - ' + FfmCode from sjeJournalTypeTable where FfmCode =
+                            j.JrlType), j.JrlType) as 'journalType',
+                            j.id, j.sjeKey, j.convJrlDateTime, j.JrlAmount, j.JrlApplyDate, j.JrlReceiptMemo,
+                            j.JrlClass, j.JrlReverseMemo, j.convJrlReverseDateTime, j.JrlReverseUserID,
+                            j.JrlCourtLocation,
+                            r.RecAmount, r.RecPmtInstrument, r.RecPmtInstrument1Amt, r.RecPmtInstrument2,
+                            r.RecPmtInstrument2Amt, c.ecourt_case_id as 'case_id'
+                            FROM sjeJournal j left outer join sjeReceipt r on r.RecReceiptNum = j.JrlReceiptNum inner
+                            join sjeCase c on c.sjeDivFile = j.sjeDivFile
+                            WHERE j.JrlParentEntType = 'CAS'
+                        </sql>
+                        <bcconfig useMappings="true" updateIds="false"/>
+                    </source>
+                    <mappings>
+                        <mapping desc="required by eCourt data model" source="optlock" dest="optlock"/>
+                        <mapping desc="Sb_ConvertedJournalEntry" source="case_id" dest="case_id"/>
+                        <mapping desc="Sb_ConvertedJournalEntry" source="journalType" dest="journalType"/>
+                        <mapping desc="Sb_ConvertedJournalEntry" source="convJrlDateTime" dest="journalDateTime"/>
+                        <mapping desc="Sb_ConvertedJournalEntry" source="JrlAmount" dest="amount"/>
+                        <mapping desc="Sb_ConvertedJournalEntry" source="receiptNumber" dest="receiptNumber"/>
+                        <mapping desc="Sb_ConvertedJournalEntry" source="JrlApplyDate" dest="applyDate"/>
+                        <mapping desc="Sb_ConvertedJournalEntry" source="JrlReceiptMemo" dest="receiptMemo"/>
+                        <mapping desc="Sb_ConvertedJournalEntry" source="JrlClass" dest="journalClass"/>
+                        <mapping desc="Sb_ConvertedJournalEntry" source="JrlReverseMemo" dest="reverseMemo"/>
+                        <mapping desc="Sb_ConvertedJournalEntry" source="reverseType" dest="reverseType"/>
+                        <mapping desc="Sb_ConvertedJournalEntry" source="convJrlReverseDateTime"
+                                 dest="reverseDateTime"/>
+                        <mapping desc="Sb_ConvertedJournalEntry" source="JrlReverseUserID" dest="reverseUserId"/>
+                        <mapping desc="Sb_ConvertedJournalEntry" source="JrlCourtLocation" dest="courtLocation"/>
+                        <mapping desc="Sb_ConvertedJournalEntry" source="RecAmount" dest="receiptAmount"/>
+                        <mapping desc="Sb_ConvertedJournalEntry" source="RecPmtInstrument" dest="receiptPmtInstr1"/>
+                        <mapping desc="Sb_ConvertedJournalEntry" source="RecPmtInstrument1Amt"
+                                 dest="receiptPmtInstr1Amt"/>
+                        <mapping desc="Sb_ConvertedJournalEntry" source="RecPmtInstrument2" dest="receiptPmtInstr2"/>
+                        <mapping desc="Sb_ConvertedJournalEntry" source="RecPmtInstrument2Amt"
+                                 dest="receiptPmtInstr2Amt"/>
+                        <mapping desc="metadata" source="dateCreated" dest="dateCreated"/>
+                        <mapping desc="metadata" source="lastUpdated" dest="lastUpdated"/>
+                        <mapping desc="metadata" source="createUsername" dest="createUsername"/>
+                        <mapping desc="metadata" source="lastUpdateUsername" dest="lastUpdateUsername"/>
+                    </mappings>
+                    <destination database="SB-conv" table="ecourt.tSb_ConvertedJournalEntry" creation="None"
+                                 exists="SkipCreation"/>
+                </action>
+            </actions>
+        </stage>
+        <stage num="3" desc="" mode="Serial">
+            <actions>
+                <action type="SqlScript" desc="Create and populate invoice table" verbose="true">
+                    <source database="SB-stage" table="sjeInvoice">
+                        <sql type="PreUpdate" desc="Create table">
+                            USE [SB-stage];
+                            IF EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[sjeInvoice]') AND
+                            type in (N'U'))
+                            BEGIN DROP TABLE [dbo].[sjeInvoice]; END
+                            SET ANSI_NULLS ON;
+                            SET QUOTED_IDENTIFIER ON;
+                            SET ANSI_PADDING ON;
+                            CREATE TABLE [dbo].[sjeInvoice](
+                            [id] [numeric](19, 0) IDENTITY(1,1) NOT NULL,
+                            [case_id] [numeric](19, 0) NULL,
+                            [caseNumber] [varchar](255) NULL,
+                            [party_id] [numeric](19, 0) NULL,
+                            [invoice_id] [numeric](19, 0) NULL,
+                            [OidAmount] [decimal](18, 2) NULL,
+                            [OidAmtPaidToDate] [decimal](18, 2) NULL,
+                            [OidFFCCode] [varchar] (255) NULL,
+                            [OimOrderDate] [datetime2](0) NULL,
+                            [DEBUG_source] [varchar](255) NULL,
+                            [Oim_sjeKey] [varchar] (255) NULL,
+                            [processed] [tinyint] NULL,
+                            [OimEntNum] [bigint] NULL,
+                            [OidEntNum] [bigint] NULL,
+                            [seq] [int] NULL
+                            ) ON [PRIMARY]
+                            SET ANSI_PADDING OFF;
+                        </sql>
+                        <sql type="PreUpdate" desc="Add index on id column">CREATE NONCLUSTERED INDEX [idIndex] ON
+                            sjeInvoice ([id] ASC) WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB =
+                            OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON,
+                            ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+                        </sql>
+                        <sql type="PreUpdate" desc="Remvove invoices for cases that are not being converted">DELETE
+                            sjeOpenItem FROM sjeOpenItem o left join sjeCase c on c.sjeDivFile = o.sjeDivFile where
+                            c.sjeDivFile is null
+                        </sql>
+                        <sql type="PreUpdate" desc="1 - Populate where parent is PTY">INSERT INTO sjeInvoice (case_id,
+                            caseNumber, party_id, Oim_sjeKey, OimOrderDate, OidFFCCode, OidAmount, OidAmtPaidToDate,
+                            DEBUG_source, OimEntNum, OidEntNum, seq)
+                            SELECT c.ecourt_case_id, c.CasFileID, p.ecourt_party_id, oim.sjeKey, oim.OimOrderDate,
+                            oid.OidFFCCode,
+                            oid.OidAmount, oid.OidAmtPaidToDate, 'Pty parent' as 'group', oim.OimEntNum, oid.OidEntNum,
+                            1 as 'seq'
+                            FROM sjePartyParty p
+                            inner join sjeOpenItem oim on p.sjeKey = oim.sjeParentKey
+                            inner join sjeOpenItemDetail oid on oim.sjeKey = oid.sjeParentKey
+                            inner join sjeCase c on c.sjeDivFile = p.sjeDivFile
+                            WHERE oim.OimParentEntType = 'PTY' and oim.OimClosed = ''
+                        </sql>
+                    </source>
+                </action>
+            </actions>
+        </stage>
+    </stages>
+</conversion>
