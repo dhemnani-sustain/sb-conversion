@@ -10,6 +10,7 @@
         <database name="TempDBSB" description="eCourt lookup database" type="SqlServer" version="2008 R2"
                   connectionstring="Persist Security Info=False;User ID=ecourt;Initial Catalog=TempDBSB;Data Source=ST018;password=dbpass"/>
     </databases>
+
     <stages>
         <stage num="1" desc="" mode="Serial">
             <actions>
